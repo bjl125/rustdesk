@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:extended_text/extended_text.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/desktop/widgets/dragable_divider.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -17,6 +18,8 @@ import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:flutter_hbb/web/dummy.dart'
+    if (dart.library.html) 'package:flutter_hbb/web/web_unique.dart';
 
 import '../../consts.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
@@ -50,22 +53,31 @@ enum MouseFocusScope {
 }
 
 class FileManagerPage extends StatefulWidget {
-  const FileManagerPage(
+  FileManagerPage(
       {Key? key,
       required this.id,
       required this.password,
       required this.isSharedPassword,
-      required this.tabController,
+      this.tabController,
+      this.connToken,
       this.forceRelay})
       : super(key: key);
   final String id;
   final String? password;
   final bool? isSharedPassword;
   final bool? forceRelay;
-  final DesktopTabController tabController;
+  final String? connToken;
+  final DesktopTabController? tabController;
+  final SimpleWrapper<State<FileManagerPage>?> _lastState = SimpleWrapper(null);
+
+  FFI get ffi => (_lastState.value! as _FileManagerPageState)._ffi;
 
   @override
-  State<StatefulWidget> createState() => _FileManagerPageState();
+  State<StatefulWidget> createState() {
+    final state = _FileManagerPageState();
+    _lastState.value = state;
+    return state;
+  }
 }
 
 class _FileManagerPageState extends State<FileManagerPage>
@@ -88,6 +100,7 @@ class _FileManagerPageState extends State<FileManagerPage>
         isFileTransfer: true,
         password: widget.password,
         isSharedPassword: widget.isSharedPassword,
+        connToken: widget.connToken,
         forceRelay: widget.forceRelay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ffi.dialogManager
@@ -97,11 +110,14 @@ class _FileManagerPageState extends State<FileManagerPage>
     if (!isLinux) {
       WakelockPlus.enable();
     }
+    if (isWeb) {
+      _ffi.ffiModel.updateEventListener(_ffi.sessionId, widget.id);
+    }
     debugPrint("File manager page init success with id ${widget.id}");
     _ffi.dialogManager.setOverlayState(_overlayKeyState);
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController.onSelected?.call(widget.id);
+      widget.tabController?.onSelected?.call(widget.id);
     });
     WidgetsBinding.instance.addObserver(this);
   }
@@ -131,19 +147,34 @@ class _FileManagerPageState extends State<FileManagerPage>
     }
   }
 
+  Widget willPopScope(Widget child) {
+    if (isWeb) {
+      return WillPopScope(
+        onWillPop: () async {
+          clientClose(_ffi.sessionId, _ffi);
+          return false;
+        },
+        child: child,
+      );
+    } else {
+      return child;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return Overlay(key: _overlayKeyState.key, initialEntries: [
       OverlayEntry(builder: (_) {
-        return Scaffold(
+        return willPopScope(Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: Row(
             children: [
-              Flexible(
-                  flex: 3,
-                  child: dropArea(FileManagerView(
-                      model.localController, _ffi, _mouseFocusScope))),
+              if (!isWeb)
+                Flexible(
+                    flex: 3,
+                    child: dropArea(FileManagerView(
+                        model.localController, _ffi, _mouseFocusScope))),
               Flexible(
                   flex: 3,
                   child: dropArea(FileManagerView(
@@ -151,7 +182,7 @@ class _FileManagerPageState extends State<FileManagerPage>
               Flexible(flex: 2, child: statusList())
             ],
           ),
-        );
+        ));
       })
     ]);
   }
@@ -192,7 +223,13 @@ class _FileManagerPageState extends State<FileManagerPage>
           return Icon(Icons.delete_outline, color: color);
         default:
           return Transform.rotate(
-            angle: job.isRemoteToLocal ? pi : 0,
+            angle: isWeb
+                ? job.isRemoteToLocal
+                    ? pi / 2
+                    : pi / 2 * 3
+                : job.isRemoteToLocal
+                    ? pi
+                    : 0,
             child: Icon(Icons.arrow_forward_ios, color: color),
           );
       }
@@ -478,6 +515,9 @@ class _FileManagerViewState extends State<FileManagerView> {
   }
 
   Widget headTools() {
+    var uploadButtonTapPosition = RelativeRect.fill;
+    RxBool isUploadFolder =
+        (bind.mainGetLocalOption(key: 'upload-folder-button') == 'Y').obs;
     return Container(
       child: Column(
         children: [
@@ -750,7 +790,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                                   ),
                                   controller: name,
                                   autofocus: true,
-                                ),
+                                ).workaroundFreezeLinuxMint(),
                               ],
                             ),
                             actions: [
@@ -800,6 +840,66 @@ class _FileManagerViewState extends State<FileManagerView> {
                   ],
                 ),
               ),
+              if (isWeb)
+                Obx(() => ElevatedButton.icon(
+                      style: ButtonStyle(
+                        padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
+                            isLocal
+                                ? EdgeInsets.only(left: 10)
+                                : EdgeInsets.only(right: 10)),
+                        backgroundColor: MaterialStateProperty.all(
+                          selectedItems.items.isEmpty
+                              ? MyTheme.accent80
+                              : MyTheme.accent,
+                        ),
+                      ),
+                      onPressed: () =>
+                          {webselectFiles(is_folder: isUploadFolder.value)},
+                      label: InkWell(
+                        hoverColor: Colors.transparent,
+                        splashColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        focusColor: Colors.transparent,
+                        onTapDown: (e) {
+                          final x = e.globalPosition.dx;
+                          final y = e.globalPosition.dy;
+                          uploadButtonTapPosition =
+                              RelativeRect.fromLTRB(x, y, x, y);
+                        },
+                        onTap: () async {
+                          final value = await showMenu<bool>(
+                              context: context,
+                              position: uploadButtonTapPosition,
+                              items: [
+                                PopupMenuItem<bool>(
+                                  value: false,
+                                  child: Text(translate('Upload files')),
+                                ),
+                                PopupMenuItem<bool>(
+                                  value: true,
+                                  child: Text(translate('Upload folder')),
+                                ),
+                              ]);
+                          if (value != null) {
+                            isUploadFolder.value = value;
+                            bind.mainSetLocalOption(
+                                key: 'upload-folder-button',
+                                value: value ? 'Y' : '');
+                            webselectFiles(is_folder: value);
+                          }
+                        },
+                        child: Icon(Icons.arrow_drop_down),
+                      ),
+                      icon: Text(
+                        translate(isUploadFolder.isTrue
+                            ? 'Upload folder'
+                            : 'Upload files'),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: Colors.white,
+                        ),
+                      ).marginOnly(left: 8),
+                    )).marginOnly(left: 16),
               Obx(() => ElevatedButton.icon(
                     style: ButtonStyle(
                       padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
@@ -833,19 +933,22 @@ class _FileManagerViewState extends State<FileManagerView> {
                                   : Colors.white,
                             ),
                           )
-                        : RotatedBox(
-                            quarterTurns: 2,
-                            child: SvgPicture.asset(
-                              "assets/arrow.svg",
-                              colorFilter: svgColor(selectedItems.items.isEmpty
-                                  ? Theme.of(context).brightness ==
-                                          Brightness.light
-                                      ? MyTheme.grayBg
-                                      : MyTheme.darkGray
-                                  : Colors.white),
-                              alignment: Alignment.bottomRight,
-                            ),
-                          ),
+                        : isWeb
+                            ? Offstage()
+                            : RotatedBox(
+                                quarterTurns: 2,
+                                child: SvgPicture.asset(
+                                  "assets/arrow.svg",
+                                  colorFilter: svgColor(
+                                      selectedItems.items.isEmpty
+                                          ? Theme.of(context).brightness ==
+                                                  Brightness.light
+                                              ? MyTheme.grayBg
+                                              : MyTheme.darkGray
+                                          : Colors.white),
+                                  alignment: Alignment.bottomRight,
+                                ),
+                              ),
                     label: isLocal
                         ? SvgPicture.asset(
                             "assets/arrow.svg",
@@ -857,7 +960,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                                 : Colors.white),
                           )
                         : Text(
-                            translate('Receive'),
+                            translate(isWeb ? 'Download' : 'Receive'),
                             style: TextStyle(
                               color: selectedItems.items.isEmpty
                                   ? Theme.of(context).brightness ==
@@ -1020,7 +1123,7 @@ class _FileManagerViewState extends State<FileManagerView> {
               if (!entry.isDrive &&
                   versionCmp(_ffi.ffiModel.pi.version, "1.3.0") >= 0)
                 mod_menu.PopupMenuItem(
-                  child: Text("Rename"),
+                  child: Text(translate("Rename")),
                   height: CustomPopupMenuTheme.height,
                   onTap: () {
                     controller.renameAction(entry, isLocal);
@@ -1576,7 +1679,7 @@ class _FileManagerViewState extends State<FileManagerView> {
             onChanged: _locationStatus.value == LocationStatus.fileSearchBar
                 ? (searchText) => onSearchText(searchText, isLocal)
                 : null,
-          ),
+          ).workaroundFreezeLinuxMint(),
         )
       ],
     );

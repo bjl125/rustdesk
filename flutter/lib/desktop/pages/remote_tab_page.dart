@@ -80,7 +80,15 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         label: peerId!,
         selectedIcon: selectedIcon,
         unselectedIcon: unselectedIcon,
-        onTabCloseButton: () => tabController.closeBy(peerId),
+        onTabCloseButton: () async {
+          if (await desktopTryShowTabAuditDialogCloseCancelled(
+            id: peerId!,
+            tabController: tabController,
+          )) {
+            return;
+          }
+          tabController.closeBy(peerId!);
+        },
         page: RemotePage(
           key: ValueKey(peerId),
           id: peerId!,
@@ -146,16 +154,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
                 connectionType.secure.value == ConnectionType.strSecure;
             bool direct =
                 connectionType.direct.value == ConnectionType.strDirect;
-            String msgConn;
-            if (secure && direct) {
-              msgConn = translate("Direct and encrypted connection");
-            } else if (secure && !direct) {
-              msgConn = translate("Relayed and encrypted connection");
-            } else if (!secure && direct) {
-              msgConn = translate("Direct and unencrypted connection");
-            } else {
-              msgConn = translate("Relayed and unencrypted connection");
-            }
+            String msgConn = getConnectionText(
+                secure, direct, connectionType.stream_type.value);
             var msgFingerprint = '${translate('Fingerprint')}:\n';
             var fingerprint = FingerprintState.find(key).value;
             if (fingerprint.isEmpty) {
@@ -212,14 +212,16 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     );
     final tabWidget = isLinux
         ? buildVirtualWindowFrame(context, child)
-        : Obx(() => Container(
-              decoration: BoxDecoration(
-                border: Border.all(
-                    color: MyTheme.color(context).border!,
-                    width: stateGlobal.windowBorderWidth.value),
-              ),
-              child: child,
-            ));
+        : workaroundWindowBorder(
+            context,
+            Obx(() => Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: MyTheme.color(context).border!,
+                        width: stateGlobal.windowBorderWidth.value),
+                  ),
+                  child: child,
+                )));
     return isMacOS || kUseCompatibleUiMode
         ? tabWidget
         : Obx(() => SubWindowDragToResizeArea(
@@ -267,8 +269,10 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           style: style,
         ),
         proc: () async {
-          await DesktopMultiWindow.invokeMethod(kMainWindowId,
-              kWindowEventMoveTabToNewWindow, '${windowId()},$key,$sessionId');
+          await DesktopMultiWindow.invokeMethod(
+              kMainWindowId,
+              kWindowEventMoveTabToNewWindow,
+              '${windowId()},$key,$sessionId,RemoteDesktop');
           cancelFunc();
         },
         padding: padding,
@@ -320,7 +324,13 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           translate('Close'),
           style: style,
         ),
-        proc: () {
+        proc: () async {
+          if (await desktopTryShowTabAuditDialogCloseCancelled(
+            id: key,
+            tabController: tabController,
+          )) {
+            return;
+          }
           tabController.closeBy(key);
           cancelFunc();
         },
@@ -373,6 +383,14 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
 
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.length;
+    if (connLength == 1) {
+      if (await desktopTryShowTabAuditDialogCloseCancelled(
+        id: tabController.state.value.tabs[0].key,
+        tabController: tabController,
+      )) {
+        return false;
+      }
+    }
     if (connLength <= 1) {
       tabController.clear();
       return true;
@@ -395,7 +413,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       RemoteCountState.find().value = tabController.length;
 
   Future<dynamic> _remoteMethodHandler(call, fromWindowId) async {
-    print(
+    debugPrint(
         "[Remote Page] call ${call.method} with args ${call.arguments} from window $fromWindowId");
 
     dynamic returnValue;
@@ -415,8 +433,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           await WindowController.fromWindowId(windowId()).setFullscreen(false);
           stateGlobal.setFullscreen(false, procWnd: false);
         }
-        await setNewConnectWindowFrame(
-            windowId(), id!, prePeerCount, display, screenRect);
+        await setNewConnectWindowFrame(windowId(), id!, prePeerCount,
+            WindowType.RemoteDesktop, display, screenRect);
         Future.delayed(Duration(milliseconds: isWindows ? 100 : 0), () async {
           await windowOnTop(windowId());
         });
@@ -427,7 +445,15 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         label: id,
         selectedIcon: selectedIcon,
         unselectedIcon: unselectedIcon,
-        onTabCloseButton: () => tabController.closeBy(id),
+        onTabCloseButton: () async {
+          if (await desktopTryShowTabAuditDialogCloseCancelled(
+            id: id,
+            tabController: tabController,
+          )) {
+            return;
+          }
+          tabController.closeBy(id);
+        },
         page: RemotePage(
           key: ValueKey(id),
           id: id,

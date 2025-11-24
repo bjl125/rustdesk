@@ -70,6 +70,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       false; //androidVersion >= 26; // remove because not work on every device
   var _ignoreBatteryOpt = false;
   var _enableStartOnBoot = false;
+  var _checkUpdateOnStartup = false;
   var _floatingWindowDisabled = false;
   var _keepScreenOn = KeepScreenOn.duringControlled; // relay on floating window
   var _enableAbr = false;
@@ -78,7 +79,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _enableDirectIPAccess = false;
   var _enableRecordSession = false;
   var _enableHardwareCodec = false;
+  var _allowWebSocket = false;
   var _autoRecordIncomingSession = false;
+  var _autoRecordOutgoingSession = false;
   var _allowAutoDisconnect = false;
   var _localIP = "";
   var _directAccessPort = "";
@@ -88,7 +91,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _hideServer = false;
   var _hideProxy = false;
   var _hideNetwork = false;
+  var _hideWebSocket = false;
   var _enableTrustedDevices = false;
+  var _enableUdpPunch = false;
+  var _allowInsecureTlsFallback = false;
+  var _disableUdp = false;
+  var _enableIpv6Punch = false;
+  var _isUsingPublicServer = false;
+  var _allowAskForNoteAtEndOfConnection = false;
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -102,8 +112,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         bind.mainGetOptionSync(key: kOptionEnableRecordSession));
     _enableHardwareCodec = option2bool(kOptionEnableHwcodec,
         bind.mainGetOptionSync(key: kOptionEnableHwcodec));
+    _allowWebSocket = mainGetBoolOptionSync(kOptionAllowWebSocket);
+    _allowInsecureTlsFallback =
+        mainGetBoolOptionSync(kOptionAllowInsecureTLSFallback);
+    _disableUdp = bind.mainGetOptionSync(key: kOptionDisableUdp) == 'Y';
     _autoRecordIncomingSession = option2bool(kOptionAllowAutoRecordIncoming,
         bind.mainGetOptionSync(key: kOptionAllowAutoRecordIncoming));
+    _autoRecordOutgoingSession = option2bool(kOptionAllowAutoRecordOutgoing,
+        bind.mainGetLocalOption(key: kOptionAllowAutoRecordOutgoing));
     _localIP = bind.mainGetOptionSync(key: 'local-ip-addr');
     _directAccessPort = bind.mainGetOptionSync(key: kOptionDirectAccessPort);
     _allowAutoDisconnect = option2bool(kOptionAllowAutoDisconnect,
@@ -115,7 +131,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     _hideProxy = bind.mainGetBuildinOption(key: kOptionHideProxySetting) == 'Y';
     _hideNetwork =
         bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) == 'Y';
+    _hideWebSocket =
+        bind.mainGetBuildinOption(key: kOptionHideWebSocketSetting) == 'Y' ||
+            isWeb;
     _enableTrustedDevices = mainGetBoolOptionSync(kOptionEnableTrustedDevices);
+    _enableUdpPunch = mainGetLocalBoolOptionSync(kOptionEnableUdpPunch);
+    _enableIpv6Punch = mainGetLocalBoolOptionSync(kOptionEnableIpv6Punch);
+    _allowAskForNoteAtEndOfConnection =
+        mainGetLocalBoolOptionSync(kOptionAllowAskForNoteAtEndOfConnection);
   }
 
   @override
@@ -151,6 +174,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         _enableStartOnBoot = enableStartOnBoot;
       }
 
+      var checkUpdateOnStartup =
+          mainGetLocalBoolOptionSync(kOptionEnableCheckUpdate);
+      if (checkUpdateOnStartup != _checkUpdateOnStartup) {
+        update = true;
+        _checkUpdateOnStartup = checkUpdateOnStartup;
+      }
+
       var floatingWindowDisabled =
           bind.mainGetLocalOption(key: kOptionDisableFloatingWindow) == "Y" ||
               !await AndroidPermissionManager.check(kSystemAlertWindow);
@@ -179,6 +209,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         update = true;
         _buildDate = buildDate;
       }
+
+      final isUsingPublicServer = await bind.mainIsUsingPublicServer();
+      if (_isUsingPublicServer != isUsingPublicServer) {
+        update = true;
+        _isUsingPublicServer = isUsingPublicServer;
+      }
+
       if (update) {
         setState(() {});
       }
@@ -231,6 +268,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     Provider.of<FfiModel>(context);
     final outgoingOnly = bind.isOutgoingOnly();
+    final incomingOnly = bind.isIncomingOnly();
     final customClientSection = CustomSettingsSection(
         child: Column(
       children: [
@@ -356,7 +394,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         },
       ),
       SettingsTile.switchTile(
-        title: Text('${translate('Adaptive bitrate')} (beta)'),
+        title: Text(translate('Adaptive bitrate')),
         initialValue: _enableAbr,
         onToggle: isOptionFixed(kOptionEnableAbr)
             ? null
@@ -518,7 +556,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     enhancementsTiles.add(SettingsTile.switchTile(
         initialValue: _enableStartOnBoot,
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text("${translate('Start on boot')} (beta)"),
+          Text(translate('Start on boot')),
           Text(
               '* ${translate('Start the screen sharing service on boot, requires special permissions')}',
               style: Theme.of(context).textTheme.bodySmall),
@@ -547,6 +585,22 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
 
           gFFI.invokeMethod(AndroidChannel.kSetStartOnBootOpt, toValue);
         }));
+
+    if (!bind.isCustomClient()) {
+      enhancementsTiles.add(
+        SettingsTile.switchTile(
+          initialValue: _checkUpdateOnStartup,
+          title:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(translate('Check for software update on startup')),
+          ]),
+          onToggle: (bool toValue) async {
+            await mainSetLocalBoolOption(kOptionEnableCheckUpdate, toValue);
+            setState(() => _checkUpdateOnStartup = toValue);
+          },
+        ),
+      );
+    }
 
     onFloatingWindowChanged(bool toValue) async {
       if (toValue) {
@@ -629,15 +683,91 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 title: Text(translate('ID/Relay Server')),
                 leading: Icon(Icons.cloud),
                 onPressed: (context) {
-                  showServerSettings(gFFI.dialogManager);
+                  showServerSettings(gFFI.dialogManager, (callback) async {
+                    _isUsingPublicServer = await bind.mainIsUsingPublicServer();
+                    setState(callback);
+                  });
                 }),
-          if (!isIOS && !_hideNetwork && !_hideProxy)
+          if (!_hideNetwork && !_hideProxy)
             SettingsTile(
                 title: Text(translate('Socks5/Http(s) Proxy')),
                 leading: Icon(Icons.network_ping),
                 onPressed: (context) {
                   changeSocks5Proxy();
                 }),
+          if (!disabledSettings && !_hideNetwork && !_hideWebSocket)
+            SettingsTile.switchTile(
+              title: Text(translate('Use WebSocket')),
+              initialValue: _allowWebSocket,
+              onToggle: isOptionFixed(kOptionAllowWebSocket)
+                  ? null
+                  : (v) async {
+                      await mainSetBoolOption(kOptionAllowWebSocket, v);
+                      final newValue =
+                          await mainGetBoolOption(kOptionAllowWebSocket);
+                      setState(() {
+                        _allowWebSocket = newValue;
+                      });
+                    },
+            ),
+          if (!_isUsingPublicServer)
+            SettingsTile.switchTile(
+              title: Text(translate('Allow insecure TLS fallback')),
+              initialValue: _allowInsecureTlsFallback,
+              onToggle: isOptionFixed(kOptionAllowInsecureTLSFallback)
+                  ? null
+                  : (v) async {
+                      await mainSetBoolOption(
+                          kOptionAllowInsecureTLSFallback, v);
+                      final newValue = mainGetBoolOptionSync(
+                          kOptionAllowInsecureTLSFallback);
+                      setState(() {
+                        _allowInsecureTlsFallback = newValue;
+                      });
+                    },
+            ),
+          if (isAndroid && !outgoingOnly && !_isUsingPublicServer)
+            SettingsTile.switchTile(
+              title: Text(translate('Disable UDP')),
+              initialValue: _disableUdp,
+              onToggle: isOptionFixed(kOptionDisableUdp)
+                  ? null
+                  : (v) async {
+                      await bind.mainSetOption(
+                          key: kOptionDisableUdp, value: v ? 'Y' : 'N');
+                      final newValue =
+                          bind.mainGetOptionSync(key: kOptionDisableUdp) == 'Y';
+                      setState(() {
+                        _disableUdp = newValue;
+                      });
+                    },
+            ),
+          if (!incomingOnly)
+            SettingsTile.switchTile(
+              title: Text(translate('Enable UDP hole punching')),
+              initialValue: _enableUdpPunch,
+              onToggle: (v) async {
+                await mainSetLocalBoolOption(kOptionEnableUdpPunch, v);
+                final newValue =
+                    mainGetLocalBoolOptionSync(kOptionEnableUdpPunch);
+                setState(() {
+                  _enableUdpPunch = newValue;
+                });
+              },
+            ),
+          if (!incomingOnly)
+            SettingsTile.switchTile(
+              title: Text(translate('Enable IPv6 P2P connection')),
+              initialValue: _enableIpv6Punch,
+              onToggle: (v) async {
+                await mainSetLocalBoolOption(kOptionEnableIpv6Punch, v);
+                final newValue =
+                    mainGetLocalBoolOptionSync(kOptionEnableIpv6Punch);
+                setState(() {
+                  _enableIpv6Punch = newValue;
+                });
+              },
+            ),
           SettingsTile(
               title: Text(translate('Language')),
               leading: Icon(Icons.translate),
@@ -654,6 +784,19 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 : Icons.light_mode),
             onPressed: (context) {
               showThemeSettings(gFFI.dialogManager);
+            },
+          ),
+          SettingsTile.switchTile(
+            title: Text(translate('note-at-conn-end-tip')),
+            initialValue: _allowAskForNoteAtEndOfConnection,
+            onToggle: (v) async {
+              await mainSetLocalBoolOption(
+                  kOptionAllowAskForNoteAtEndOfConnection, v);
+              final newValue = mainGetLocalBoolOptionSync(
+                  kOptionAllowAskForNoteAtEndOfConnection);
+              setState(() {
+                _allowAskForNoteAtEndOfConnection = newValue;
+              });
             },
           )
         ]),
@@ -674,32 +817,55 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                     },
             ),
           ]),
-        if (isAndroid && !outgoingOnly)
+        if (isAndroid)
           SettingsSection(
             title: Text(translate("Recording")),
             tiles: [
-              SettingsTile.switchTile(
-                title:
-                    Text(translate('Automatically record incoming sessions')),
-                leading: Icon(Icons.videocam),
-                description: Text(
-                    "${translate("Directory")}: ${bind.mainVideoSaveDirectory(root: false)}"),
-                initialValue: _autoRecordIncomingSession,
-                onToggle: isOptionFixed(kOptionAllowAutoRecordIncoming)
-                    ? null
-                    : (v) async {
-                        await bind.mainSetOption(
-                            key: kOptionAllowAutoRecordIncoming,
-                            value:
-                                bool2option(kOptionAllowAutoRecordIncoming, v));
-                        final newValue = option2bool(
-                            kOptionAllowAutoRecordIncoming,
-                            await bind.mainGetOption(
-                                key: kOptionAllowAutoRecordIncoming));
-                        setState(() {
-                          _autoRecordIncomingSession = newValue;
-                        });
-                      },
+              if (!outgoingOnly)
+                SettingsTile.switchTile(
+                  title:
+                      Text(translate('Automatically record incoming sessions')),
+                  initialValue: _autoRecordIncomingSession,
+                  onToggle: isOptionFixed(kOptionAllowAutoRecordIncoming)
+                      ? null
+                      : (v) async {
+                          await bind.mainSetOption(
+                              key: kOptionAllowAutoRecordIncoming,
+                              value: bool2option(
+                                  kOptionAllowAutoRecordIncoming, v));
+                          final newValue = option2bool(
+                              kOptionAllowAutoRecordIncoming,
+                              await bind.mainGetOption(
+                                  key: kOptionAllowAutoRecordIncoming));
+                          setState(() {
+                            _autoRecordIncomingSession = newValue;
+                          });
+                        },
+                ),
+              if (!incomingOnly)
+                SettingsTile.switchTile(
+                  title:
+                      Text(translate('Automatically record outgoing sessions')),
+                  initialValue: _autoRecordOutgoingSession,
+                  onToggle: isOptionFixed(kOptionAllowAutoRecordOutgoing)
+                      ? null
+                      : (v) async {
+                          await bind.mainSetLocalOption(
+                              key: kOptionAllowAutoRecordOutgoing,
+                              value: bool2option(
+                                  kOptionAllowAutoRecordOutgoing, v));
+                          final newValue = option2bool(
+                              kOptionAllowAutoRecordOutgoing,
+                              bind.mainGetLocalOption(
+                                  key: kOptionAllowAutoRecordOutgoing));
+                          setState(() {
+                            _autoRecordOutgoingSession = newValue;
+                          });
+                        },
+                ),
+              SettingsTile(
+                title: Text(translate("Directory")),
+                description: Text(bind.mainVideoSaveDirectory(root: false)),
               ),
             ],
           ),
@@ -713,7 +879,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             !outgoingOnly &&
             !hideSecuritySettings)
           SettingsSection(
-            title: Text(translate("Share Screen")),
+            title: Text(translate("Share screen")),
             tiles: shareScreenTiles,
           ),
         if (!bind.isIncomingOnly()) defaultDisplaySection(),
@@ -730,9 +896,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           tiles: [
             SettingsTile(
                 onPressed: (context) async {
-                  if (await canLaunchUrl(Uri.parse(url))) {
-                    await launchUrl(Uri.parse(url));
-                  }
+                  await launchUrl(Uri.parse(url));
                 },
                 title: Text(translate("Version: ") + version),
                 value: Padding(
@@ -799,11 +963,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       ],
     );
   }
-}
-
-void showServerSettings(OverlayDialogManager dialogManager) async {
-  Map<String, dynamic> options = jsonDecode(await bind.mainGetOptions());
-  showServerSettingsWithValue(ServerConfig.fromOptions(options), dialogManager);
 }
 
 void showLanguageSettings(OverlayDialogManager dialogManager) async {
@@ -881,9 +1040,7 @@ void showAbout(OverlayDialogManager dialogManager) {
         InkWell(
             onTap: () async {
               const url = 'https://rustdesk.com/';
-              if (await canLaunchUrl(Uri.parse(url))) {
-                await launchUrl(Uri.parse(url));
-              }
+              await launchUrl(Uri.parse(url));
             },
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),

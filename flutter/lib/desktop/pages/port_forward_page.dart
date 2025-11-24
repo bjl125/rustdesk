@@ -25,7 +25,7 @@ class _PortForward {
 }
 
 class PortForwardPage extends StatefulWidget {
-  const PortForwardPage({
+  PortForwardPage({
     Key? key,
     required this.id,
     required this.password,
@@ -33,6 +33,7 @@ class PortForwardPage extends StatefulWidget {
     required this.isRDP,
     required this.isSharedPassword,
     this.forceRelay,
+    this.connToken,
   }) : super(key: key);
   final String id;
   final String? password;
@@ -40,9 +41,17 @@ class PortForwardPage extends StatefulWidget {
   final bool isRDP;
   final bool? forceRelay;
   final bool? isSharedPassword;
+  final String? connToken;
+  final SimpleWrapper<State<PortForwardPage>?> _lastState = SimpleWrapper(null);
+
+  FFI get ffi => (_lastState.value! as _PortForwardPageState)._ffi;
 
   @override
-  State<PortForwardPage> createState() => _PortForwardPageState();
+  State<PortForwardPage> createState() {
+    final state = _PortForwardPageState();
+    _lastState.value = state;
+    return state;
+  }
 }
 
 class _PortForwardPageState extends State<PortForwardPage>
@@ -62,6 +71,7 @@ class _PortForwardPageState extends State<PortForwardPage>
         password: widget.password,
         isSharedPassword: widget.isSharedPassword,
         forceRelay: widget.forceRelay,
+        connToken: widget.connToken,
         isRdp: widget.isRDP);
     Get.put<FFI>(_ffi, tag: 'pf_${widget.id}');
     debugPrint("Port forward page init success with id ${widget.id}");
@@ -235,7 +245,7 @@ class _PortForwardPageState extends State<PortForwardPage>
               inputFormatters: inputFormatters,
               decoration: InputDecoration(
                 hintText: hint,
-              ))),
+              )).workaroundFreezeLinuxMint()),
     );
   }
 
