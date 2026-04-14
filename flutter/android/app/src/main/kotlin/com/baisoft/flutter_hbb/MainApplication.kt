@@ -1,4 +1,4 @@
-package com.baisoft.flutter_hbb
+package com.carriez.flutter_hbb
 
 import android.app.Application
 import android.util.Log
