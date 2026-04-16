@@ -1,7 +1,7 @@
 on run {daemon_file, agent_file, user, cur_pid, source_dir}
 
-  set agent_plist to "/Library/LaunchAgents/com.carriez.RustDesk_server.plist"
-  set daemon_plist to "/Library/LaunchDaemons/com.carriez.RustDesk_service.plist"
+  set agent_plist to "/Library/LaunchAgents/com.baisoft.RustDesk_server.plist"
+  set daemon_plist to "/Library/LaunchDaemons/com.baisoft.RustDesk_service.plist"
   set app_bundle to "/Applications/RustDesk.app"
 
   set check_source to "test -d " & quoted form of source_dir & " || exit 1;"
